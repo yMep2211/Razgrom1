@@ -1,791 +1,891 @@
 import sys
+from datetime import date, datetime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTableWidget, QTableWidgetItem, QComboBox,
-    QDateEdit, QLabel, QFrame, QLineEdit, QMessageBox, QDialog, QSpinBox, QFormLayout, QHeaderView, QTextEdit, QFileDialog,
+    QTableView, QPushButton, QStackedWidget, QLabel, QLineEdit,
+    QSpinBox, QMessageBox, QHeaderView, QDialog, QFormLayout, 
+    QDateEdit, QDialogButtonBox, QComboBox, QTabWidget
 )
-from PyQt6.QtCore import QDate
-from PyQt6.QtGui import QDoubleValidator
+from PyQt6.QtCore import Qt, QDate
 from db import SessionLocal
-from models import Пользователь, ПлатежиПользователей, Платеж, Категория
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen.canvas import Canvas
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfbase.pdfmetrics import registerFontFamily
-from reportlab.lib.enums import TA_CENTER
-from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-import os
+from table_models import GuestTableModel, RoomTableModel, ServiceTableModel, BookingTableModel
+from models import Гость, ТипНомера, Номер, Бронирование, ГостьБронирования, Услуга, УслугаБронирования
+from PyQt6.QtGui import QPixmap
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+import random
+from sqlalchemy import func, extract, and_
+from sqlalchemy.sql import label
 
-class LoginWindow(QDialog):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Авторизация")
-        self.setFixedSize(400, 200)
-        
-        self.db = SessionLocal()  
+class EditGuestDialog(QDialog):
+    def __init__(self, guest, session, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Редактирование гостя")
+        self.setGeometry(100, 100, 700, 100)
+        self.guest = guest
+        self.session = session
         
         layout = QVBoxLayout(self)
+        
+        # Заголовок с логотипом и названием
+        header_layout = QHBoxLayout()
+        
+        logo_label = QLabel()
+        pixmap = QPixmap("C:/Users/User/Desktop/PZ/pzxz/logo.png")  # Укажите правильный путь к файлу
+        scaled_pixmap = pixmap.scaled(100, 100)
+        logo_label.setPixmap(scaled_pixmap)
+        
+        title_label = QLabel("BobirHotel")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        
+        header_layout.addWidget(logo_label)
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        
+        layout.addLayout(header_layout)
+        
+        
+        # Форма с полями
         form_layout = QFormLayout()
         
-        self.login_combo = QComboBox()
-        self.load_users()
+        self.last_name_edit = QLineEdit(guest.Фамилия)
+        self.first_name_edit = QLineEdit(guest.Имя)
+        self.middle_name_edit = QLineEdit(guest.Отчество or "")
         
-        self.password_edit = QLineEdit()
-        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-                
-        buttons_layout = QHBoxLayout()
-        self.btn_login = QPushButton("Войти")
-        self.btn_exit = QPushButton("Выход")
-        buttons_layout.addWidget(self.btn_login)
-        buttons_layout.addWidget(self.btn_exit)
+        # Преобразуем дату рождения в QDate
+        birth_date = guest.Дата_рождения
+        qdate = QDate(birth_date.year, birth_date.month, birth_date.day)
+        self.birth_date_edit = QDateEdit(qdate)
+        self.birth_date_edit.setCalendarPopup(True)
+        self.birth_date_edit.setDisplayFormat("dd.MM.yyyy")
         
-        form_layout.addRow("Имя пользователя", self.login_combo)
-        form_layout.addRow("Пароль", self.password_edit)
+        self.passport_series_edit = QLineEdit(guest.Паспорт_серия or "")
+        self.passport_number_edit = QLineEdit(guest.Паспорт_номер or "")
+        
+        # Дата выдачи паспорта (может быть None)
+        passport_issued = guest.Паспорт_выдан
+        if passport_issued:
+            qdate_issued = QDate(passport_issued.year, passport_issued.month, passport_issued.day)
+            self.passport_issued_edit = QDateEdit(qdate_issued)
+        else:
+            self.passport_issued_edit = QDateEdit()
+        self.passport_issued_edit.setCalendarPopup(True)
+        self.passport_issued_edit.setDisplayFormat("dd.MM.yyyy")
+        self.passport_issued_edit.setSpecialValueText("Не указана")
+        
+        self.address_edit = QLineEdit(guest.Адрес or "")
+        self.phone_edit = QLineEdit(guest.Телефон)
+        
+        # Добавляем поля в форму
+        form_layout.addRow("Фамилия:", self.last_name_edit)
+        form_layout.addRow("Имя:", self.first_name_edit)
+        form_layout.addRow("Отчество:", self.middle_name_edit)
+        form_layout.addRow("Дата рождения:", self.birth_date_edit)
+        form_layout.addRow("Серия паспорта:", self.passport_series_edit)
+        form_layout.addRow("Номер паспорта:", self.passport_number_edit)
+        form_layout.addRow("Паспорт выдан:", self.passport_issued_edit)
+        form_layout.addRow("Адрес:", self.address_edit)
+        form_layout.addRow("Телефон:", self.phone_edit)
+        
+        # Кнопки OK/Cancel
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | 
+                                     QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
         
         layout.addLayout(form_layout)
-        layout.addLayout(buttons_layout)
-        
-        self.btn_login.clicked.connect(self.authenticate)
-        self.btn_exit.clicked.connect(self.reject)
+        layout.addWidget(button_box)
     
-    def load_users(self):
+    def accept(self):
+        # Валидация обязательных полей
+        if not self.last_name_edit.text().strip():
+            QMessageBox.warning(self, "Ошибка", "Фамилия не может быть пустой")
+            return
+            
+        if not self.first_name_edit.text().strip():
+            QMessageBox.warning(self, "Ошибка", "Имя не может быть пустым")
+            return
+            
+        if not self.phone_edit.text().strip():
+            QMessageBox.warning(self, "Ошибка", "Телефон не может быть пустым")
+            return
+            
         try:
-            users = self.db.query(Пользователь).all()
-            for user in users:
-                self.login_combo.addItem(user.логин, user)
+            # Обновляем данные гостя
+            self.guest.Фамилия = self.last_name_edit.text().strip()
+            self.guest.Имя = self.first_name_edit.text().strip()
+            self.guest.Отчество = self.middle_name_edit.text().strip() or None
+            self.guest.Дата_рождения = self.birth_date_edit.date().toPyDate()
+            self.guest.Паспорт_серия = self.passport_series_edit.text().strip() or None
+            self.guest.Паспорт_номер = self.passport_number_edit.text().strip() or None
+            self.guest.Паспорт_выдан = self.passport_issued_edit.date().toPyDate() if not self.passport_issued_edit.date().isNull() else None
+            self.guest.Адрес = self.address_edit.text().strip() or None
+            self.guest.Телефон = self.phone_edit.text().strip()
+            
+            # Сохраняем в БД
+            self.session.commit()
+            super().accept()
+            
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить пользователей: {str(e)}")
-    
-    def authenticate(self):
-        try:
-            user = self.login_combo.currentData()
-            if not user:
-                QMessageBox.warning(self, "Ошибка", "Выберите пользователя")
-                return
-                
-            if user.пароль == self.password_edit.text():
-                self.current_user = user
-                self.accept()
-            else:
-                QMessageBox.warning(self, "Ошибка", "Неверный пароль")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка авторизации: {str(e)}")
-    
-    def closeEvent(self, event):
-        self.db.close()
-        super().closeEvent(event)
+            self.session.rollback()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {str(e)}")
 
-class AddPayment(QDialog):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Добавление платежа")
-        self.setFixedSize(400, 250)
+class AddGuestDialog(QDialog):
+    def __init__(self, session, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("BobirHotel - Добавление гостя")
+        self.setGeometry(100, 100, 700, 100)
+        self.session = session
         
-        self.db = SessionLocal()
+        layout = QVBoxLayout(self)
         
+        # Заголовок с логотипом и названием
+        """ 
+        header_layout = QHBoxLayout()
+        
+        logo_label = QLabel()
+        pixmap = QPixmap("C:/Users/User/Desktop/PZ/pzxz/logo.png")  # Укажите правильный путь к файлу
+        scaled_pixmap = pixmap.scaled(100, 100)
+        logo_label.setPixmap(scaled_pixmap)
+        
+        title_label = QLabel("BobirHotel")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        
+        header_layout.addWidget(logo_label)
+        header_layout.addWidget(title_label)
+        header_layout.addStretch() 
+        
+        
+        layout.addLayout(header_layout)
+        """
+        
+        # Форма с полями
         form_layout = QFormLayout()
         
-        self.category_combo = QComboBox()
-        self.load_categories()
-        form_layout.addRow("Категория:", self.category_combo)
+        self.last_name_edit = QLineEdit()
+        self.first_name_edit = QLineEdit()
+        self.middle_name_edit = QLineEdit()
         
-        self.payment_name = QLineEdit()
-        self.payment_name.textChanged.connect(self.validate_inputs)
-        form_layout.addRow("Назначение платежа:", self.payment_name)
+        self.birth_date_edit = QDateEdit(QDate.currentDate())
+        self.birth_date_edit.setCalendarPopup(True)
+        self.birth_date_edit.setDisplayFormat("dd.MM.yyyy")
         
-        self.quantity = QSpinBox()
-        self.quantity.setMinimum(1)
-        self.quantity.setValue(1)
-        form_layout.addRow("Количество:", self.quantity)
+        self.passport_series_edit = QLineEdit()
+        self.passport_number_edit = QLineEdit()
         
-        self.price = QLineEdit()
-        self.price.setValidator(QDoubleValidator(0.01, 999999.99, 2))
-        self.price.textChanged.connect(self.validate_inputs)
-        price_layout = QHBoxLayout()
-        price_layout.addWidget(self.price)
-        price_layout.addWidget(QLabel("р."))
-        price_layout.addStretch()
-        form_layout.addRow("Цена:", price_layout)
+        self.passport_issued_edit = QDateEdit()
+        self.passport_issued_edit.setCalendarPopup(True)
+        self.passport_issued_edit.setDisplayFormat("dd.MM.yyyy")
+        self.passport_issued_edit.setSpecialValueText("Не указана")
         
-        buttons_layout = QHBoxLayout()
-        self.btn_add = QPushButton("Добавить")  
-        self.btn_cancel = QPushButton("Отменить")
-        buttons_layout.addWidget(self.btn_add)
-        buttons_layout.addWidget(self.btn_cancel)
+        self.address_edit = QLineEdit()
+        self.phone_edit = QLineEdit()
         
-        form_layout.addRow(buttons_layout)
-        self.setLayout(form_layout)
+        # Добавляем поля в форму
+        form_layout.addRow("Фамилия*:", self.last_name_edit)
+        form_layout.addRow("Имя*:", self.first_name_edit)
+        form_layout.addRow("Отчество:", self.middle_name_edit)
+        form_layout.addRow("Дата рождения*:", self.birth_date_edit)
+        form_layout.addRow("Серия паспорта:", self.passport_series_edit)
+        form_layout.addRow("Номер паспорта:", self.passport_number_edit)
+        form_layout.addRow("Паспорт выдан:", self.passport_issued_edit)
+        form_layout.addRow("Адрес:", self.address_edit)
+        form_layout.addRow("Телефон*:", self.phone_edit)
         
-        self.btn_add.clicked.connect(self.try_accept)
-        self.btn_cancel.clicked.connect(self.reject)
+        # Кнопки OK/Cancel
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | 
+                                    QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        
+        layout.addLayout(form_layout)
+        layout.addWidget(button_box)
+        
+
     
-    def validate_inputs(self):
-        name_valid = self.is_valid_payment_name(self.payment_name.text())
-        price_valid = self.is_valid_price(self.price.text())
-        self.btn_add.setEnabled(name_valid and price_valid)
-    
-    def is_valid_payment_name(self, text: str) -> bool:
-        
-        clean_text = text.replace(" ", "")
-        if len(clean_text) < 3:
-            return False
-            
-        russian_letters = sum(1 for c in clean_text.lower() if 'а' <= c <= 'я')
-        has_english = any(c.isalpha() and c.isascii() for c in clean_text)
-        
-        return russian_letters >= 3 and not has_english
-    
-    def is_valid_price(self, text: str) -> bool:
-        try:
-            return float(text.replace(",", ".")) > 0
-        except ValueError:
-            return False
-    
-    def try_accept(self):
-        if not self.is_valid_payment_name(self.payment_name.text()):
-            QMessageBox.warning(self, "Ошибка", 
-                "Назначение платежа должно:\n"
-                "- Содержать минимум 3 русские буквы\n")
+    def accept(self):
+        # Валидация обязательных полей
+        if not self.last_name_edit.text().strip():
+            QMessageBox.warning(self, "Ошибка", "Фамилия не может быть пустой")
             return
             
-        if not self.is_valid_price(self.price.text()):
-            QMessageBox.warning(self, "Ошибка", 
-                "Цена должна быть положительным числом")
+        if not self.first_name_edit.text().strip():
+            QMessageBox.warning(self, "Ошибка", "Имя не может быть пустым")
             return
             
-        self.accept()
-    
-    def get_payment_data(self):
-        return {
-            'name': self.payment_name.text().strip(),
-            'quantity': self.quantity.value(),
-            'price': float(self.price.text().replace(",", ".")),
-            'category_id': self.category_combo.currentData()
-        }
-    
-    def load_categories(self):
+        if not self.phone_edit.text().strip():
+            QMessageBox.warning(self, "Ошибка", "Телефон не может быть пустым")
+            return
+        
+        # Проверка возраста (минимум 18 лет)
+        birth_date = self.birth_date_edit.date().toPyDate()
+        today = date.today()
+        age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+        
+        if age < 18:
+            QMessageBox.warning(
+                self, 
+                "Ошибка", 
+                "Невозможно добавить гостя младше 18 лет!\n"
+                f"Указанный возраст: {age} лет"
+            )
+            return
+            
         try:
-            categories = self.db.query(Категория).order_by(Категория.название).all()
-            for category in categories:
-                self.category_combo.addItem(category.название, category.id)
+            # Создаем нового гостя
+            new_guest = Гость(
+                Фамилия=self.last_name_edit.text().strip(),
+                Имя=self.first_name_edit.text().strip(),
+                Отчество=self.middle_name_edit.text().strip() or None,
+                Дата_рождения=birth_date,
+                Паспорт_серия=self.passport_series_edit.text().strip() or None,
+                Паспорт_номер=self.passport_number_edit.text().strip() or None,
+                Паспорт_выдан=self.passport_issued_edit.date().toPyDate() if not self.passport_issued_edit.date().isNull() else None,
+                Адрес=self.address_edit.text().strip() or None,
+                Телефон=self.phone_edit.text().strip()
+            )
+            
+            # Добавляем в БД
+            self.session.add(new_guest)
+            self.session.commit()
+            super().accept()
+            
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить категории: {str(e)}")
-    
-    def closeEvent(self, event):
-        self.db.close()
-        super().closeEvent(event)
-        
-class DeletePayment(QDialog):
-    def __init__(self, current_user, parent=None):
+            self.session.rollback()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось добавить гостя: {str(e)}")
+
+class AddRoomDialog(QDialog):
+    def __init__(self, session, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Удаление платежа")
-        self.setFixedSize(500, 300)
-        self.current_user = current_user
-        self.db = SessionLocal()
+        self.session = session
+        self.setWindowTitle("Добавить номер")
+        self.setFixedSize(400, 300)
         
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
         
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels([
-            "ID", 
-            "Наименование", 
-            "Дата", 
-            "Сумма", 
-            "Категория"
-        ])
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        # Заголовок с логотипом и названием
+        header_layout = QHBoxLayout()
         
-        self.load_payments()
-        layout.addWidget(self.table)
+        logo_label = QLabel()
+        pixmap = QPixmap("C:/Users/User/Desktop/PZ/pzxz/logo.png")  # Укажите правильный путь к файлу
+        scaled_pixmap = pixmap.scaled(100, 100)
+        logo_label.setPixmap(scaled_pixmap)
         
-        buttons_layout = QHBoxLayout()
-        self.btn_delete = QPushButton("Удалить выбранное")
-        self.btn_cancel = QPushButton("Отмена")
-        buttons_layout.addWidget(self.btn_delete)
-        buttons_layout.addWidget(self.btn_cancel)
+        title_label = QLabel("BobirHotel")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         
-        layout.addLayout(buttons_layout)
-        self.setLayout(layout)
+        header_layout.addWidget(logo_label)
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
         
-        self.btn_delete.clicked.connect(self.confirm_delete)
-        self.btn_cancel.clicked.connect(self.reject)
+        layout.addLayout(header_layout)
+        
+        # Выпадающий список для типа номера
+        self.type_combo = QComboBox()
+        room_types = session.query(ТипНомера).all()
+        for rt in room_types:
+            self.type_combo.addItem(f"{rt.Название} ({rt.Цена_сутки}₽/сут)", rt.ID)
+        
+        # Поля ввода
+        self.room_number_edit = QLineEdit()
+        self.room_number_edit.setPlaceholderText("Например: 101A")
+        
+        # Форма
+        form = QFormLayout()
+        form.addRow("Тип номера*:", self.type_combo)
+        form.addRow("Номер комнаты*:", self.room_number_edit)
+        
+        # Кнопки
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | 
+                                  QDialogButtonBox.StandardButton.Cancel)
+        btn_box.accepted.connect(self.validate_and_save)
+        btn_box.rejected.connect(self.reject)
+        
+        layout.addLayout(form)
+        layout.addWidget(btn_box)
     
-    def load_payments(self):
+    def validate_and_save(self):
+        if not self.room_number_edit.text().strip():
+            QMessageBox.warning(self, "Ошибка", "Введите номер комнаты")
+            return
+            
         try:
-            payments = self.db.query(Платеж, Категория)\
-                .join(ПлатежиПользователей, ПлатежиПользователей.id_платежа == Платеж.id)\
-                .join(Категория, Категория.id == Платеж.id_категории)\
-                .filter(ПлатежиПользователей.id_пользователя == self.current_user.id)\
-                .order_by(Платеж.дата.desc())\
-                .all()
+            new_room = Номер(
+                Тип_ID=self.type_combo.currentData(),
+                Номер_комнаты=self.room_number_edit.text().strip(),
+                Статус="свободен"
+            )
+            self.session.add(new_room)
+            self.session.commit()
+            self.accept()
+        except Exception as e:
+            self.session.rollback()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения: {str(e)}")
+
+class AddBookingDialog(QDialog):
+    def __init__(self, session, parent=None):
+        super().__init__(parent)
+        self.session = session
+        self.setWindowTitle("Добавить бронирование")
+        self.setFixedSize(500, 400)
+        
+        layout = QVBoxLayout(self)
+        
+        # Заголовок с логотипом и названием
+        header_layout = QHBoxLayout()
+        
+        logo_label = QLabel()
+        pixmap = QPixmap("C:/Users/User/Desktop/PZ/pzxz/logo.png")  # Укажите правильный путь к файлу
+        scaled_pixmap = pixmap.scaled(100, 100)
+        logo_label.setPixmap(scaled_pixmap)
+        
+        title_label = QLabel("BobirHotel")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        
+        header_layout.addWidget(logo_label)
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        
+        layout.addLayout(header_layout)
+        
+        # Выпадающие списки
+        self.guest_combo = QComboBox()
+        guests = session.query(Гость).order_by(Гость.Фамилия).all()
+        for guest in guests:
+            self.guest_combo.addItem(f"{guest.Фамилия} {guest.Имя}", guest.ID)
+        
+        self.room_combo = QComboBox()
+        rooms = session.query(Номер).filter(Номер.Статус == "свободен").all()
+        for room in rooms:
+            self.room_combo.addItem(f"№{room.Номер_комнаты} ({room.тип.Название})", room.ID)
+        
+        # Поля дат
+        self.date_in = QDateEdit(QDate.currentDate())
+        self.date_in.setCalendarPopup(True)
+        self.date_out = QDateEdit(QDate.currentDate().addDays(1))
+        self.date_out.setCalendarPopup(True)
+        
+        # Форма
+        form = QFormLayout()
+        form.addRow("Гость*:", self.guest_combo)
+        form.addRow("Номер*:", self.room_combo)
+        form.addRow("Дата заезда*:", self.date_in)
+        form.addRow("Дата выезда*:", self.date_out)
+        
+        # Кнопки
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | 
+                                  QDialogButtonBox.StandardButton.Cancel)
+        btn_box.accepted.connect(self.validate_and_save)
+        btn_box.rejected.connect(self.reject)
+        
+        layout.addLayout(form)
+        layout.addWidget(btn_box)
+    
+    def validate_and_save(self):
+        if self.date_in.date() >= self.date_out.date():
+            QMessageBox.warning(self, "Ошибка", "Дата выезда должна быть позже даты заезда")
+            return
             
-            self.table.setRowCount(len(payments))
+        try:
+            # Создаем бронирование
+            booking = Бронирование(
+                Гость_ID=self.guest_combo.currentData(),
+                Номер_ID=self.room_combo.currentData(),
+                Дата_заезда=self.date_in.date().toPyDate(),
+                Дата_выезда=self.date_out.date().toPyDate(),
+                Статус_оплаты="не оплачено"
+            )
             
-            for row, (payment, category) in enumerate(payments):
-                self.table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
-                self.table.setItem(row, 1, QTableWidgetItem(payment.наименование_платежа))
-                self.table.setItem(row, 2, QTableWidgetItem(payment.дата.strftime("%d.%m.%Y")))
-                self.table.setItem(row, 3, QTableWidgetItem(f"{payment.стоимость:.2f}"))
-                self.table.setItem(row, 4, QTableWidgetItem(category.название))
+            # Меняем статус номера
+            room = self.session.query(Номер).get(self.room_combo.currentData())
+            room.Статус = "забронирован"
             
-            self.table.resizeColumnsToContents()
+            self.session.add(booking)
+            self.session.commit()
+            self.accept()
+        except Exception as e:
+            self.session.rollback()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения: {str(e)}")
+
+        
+class StatisticsDialog(QDialog):
+    def __init__(self, session, parent=None):
+        super().__init__(parent)
+        self.session = session
+        self.setWindowTitle("Статистика")
+        self.setGeometry(100, 100, 1000, 700)
+        
+        # Создаем основную вкладку (теперь только одна)
+        self.tab_finance = QWidget()
+        self.setup_finance_tab()
+        
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.tab_finance)
+    
+    def setup_finance_tab(self):
+        layout = QVBoxLayout(self.tab_finance)
+        
+        # Кнопки для переключения диаграмм
+        btn_layout = QHBoxLayout()
+        
+        self.btn_fin_hist = QPushButton("Гистограмма")
+        self.btn_fin_hist.clicked.connect(lambda: self.show_finance_diagram(0))
+        
+        self.btn_fin_line = QPushButton("График")
+        self.btn_fin_line.clicked.connect(lambda: self.show_finance_diagram(1))
+        
+        self.btn_fin_pie = QPushButton("Круговая")
+        self.btn_fin_pie.clicked.connect(lambda: self.show_finance_diagram(2))
+        
+        btn_layout.addWidget(self.btn_fin_hist)
+        btn_layout.addWidget(self.btn_fin_line)
+        btn_layout.addWidget(self.btn_fin_pie)
+        
+        # Область для диаграммы
+        self.figure_finance = Figure(figsize=(10, 6), dpi=100)
+        self.canvas_finance = FigureCanvas(self.figure_finance)
+        
+        layout.addLayout(btn_layout)
+        layout.addWidget(self.canvas_finance)
+        
+        # Загружаем данные и показываем первую диаграмму
+        self.load_finance_data()
+        self.show_finance_diagram(0)
+    
+    def load_finance_data(self):
+        """Загрузка финансовых данных из БД"""
+        try:
+            # Доход по месяцам
+            monthly_income = self.session.query(
+                label('month', func.date_format(Бронирование.Дата_заезда, '%Y-%m')),
+                label('income', func.coalesce(func.sum(
+                    ТипНомера.Цена_сутки * 
+                    func.datediff(Бронирование.Дата_выезда, Бронирование.Дата_заезда)
+                ), 0))
+            ).join(Номер, Бронирование.Номер_ID == Номер.ID
+            ).join(ТипНомера, Номер.Тип_ID == ТипНомера.ID
+            ).group_by('month').order_by('month').all()
+            
+            # Доход по типам номеров
+            income_by_type = self.session.query(
+                ТипНомера.Название,
+                label('income', func.coalesce(func.sum(
+                    ТипНомера.Цена_сутки * 
+                    func.datediff(Бронирование.Дата_выезда, Бронирование.Дата_заезда)
+                ), 0))
+            ).join(Номер, Номер.Тип_ID == ТипНомера.ID
+            ).join(Бронирование, Бронирование.Номер_ID == Номер.ID
+            ).group_by(ТипНомера.ID).all()
+            
+            self.finance_data = {
+                'Месяцы': [stat[0] for stat in monthly_income],
+                'Доход': [float(stat[1]) for stat in monthly_income],
+                'Типы номеров': [stat[0] for stat in income_by_type],
+                'Доход по типам': [float(stat[1]) for stat in income_by_type]
+            }
             
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить платежи: {str(e)}")
+            print(f"Ошибка загрузки финансовых данных: {e}")
+            self.finance_data = {
+                'Месяцы': ['2023-01', '2023-02'], 
+                'Доход': [0, 0],
+                'Типы номеров': ['Стандарт', 'Люкс'], 
+                'Доход по типам': [0, 0]
+            }
     
-    def confirm_delete(self):
-        selected_row = self.table.currentRow()
-        if selected_row == -1:
-            QMessageBox.warning(self, "Ошибка", "Выберите платеж для удаления")
+    def show_finance_diagram(self, diagram_type):
+        self.figure_finance.clear()
+        ax = self.figure_finance.add_subplot(111)
+        
+        if not self.finance_data['Месяцы'] or sum(self.finance_data['Доход']) == 0:
+            ax.text(0.5, 0.5, 'Нет данных для отображения', 
+                    ha='center', va='center', fontsize=12)
+        else:
+            if diagram_type == 0:  # Гистограмма дохода по месяцам
+                ax.bar(self.finance_data['Месяцы'], self.finance_data['Доход'])
+                ax.set_title('Доход по месяцам')
+                ax.set_xlabel('Месяц')
+                ax.set_ylabel('Доход, руб.')
+                ax.tick_params(axis='x', rotation=45)
+                ax.grid(axis='y')
+                
+            elif diagram_type == 1:  # График динамики дохода
+                ax.plot(self.finance_data['Месяцы'], self.finance_data['Доход'], 
+                    marker='o', linestyle='-', color='g')
+                ax.set_title('Динамика дохода')
+                ax.set_xlabel('Месяц')
+                ax.set_ylabel('Доход, руб.')
+                ax.tick_params(axis='x', rotation=45)
+                ax.grid(True)
+                
+            elif diagram_type == 2:  # Круговая диаграмма дохода по типам номеров
+                ax.pie(
+                    self.finance_data['Доход по типам'],
+                    labels=self.finance_data['Типы номеров'],
+                    autopct=lambda p: f'{p:.1f}%' if p > 0 else '',
+                    startangle=90
+                )
+                ax.set_title('Распределение дохода по типам номеров')
+        
+        self.figure_finance.tight_layout()
+        self.canvas_finance.draw()
+
+class HotelApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Гостиничная система")
+        self.setGeometry(100, 100, 1200, 700)
+        self.session = SessionLocal()
+        self.init_ui()
+        self.load_data()
+        
+    def init_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        
+        # Боковая панель
+        sidebar = QWidget()
+        sidebar_layout = QVBoxLayout(sidebar)
+        
+        # Логотип и название в сайдбаре
+        logo_label = QLabel()
+        pixmap = QPixmap("C:/Users/User/Desktop/PZ/pzxz/logo.png")  # Укажите правильный путь к файлу
+        scaled_pixmap = pixmap.scaled(100, 100)
+        logo_label.setPixmap(scaled_pixmap)
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        title_label = QLabel("BobirHotel")
+        title_label.setStyleSheet("font-size: 20px; font-weight: bold;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        sidebar_layout.addWidget(logo_label)
+        sidebar_layout.addWidget(title_label)
+        sidebar_layout.addSpacing(20)
+        
+        # Кнопки меню
+        self.btn_guests = QPushButton("Клиенты")
+        self.btn_rooms = QPushButton("Номера")
+        self.btn_services = QPushButton("Услуги")
+        self.btn_bookings = QPushButton("Бронирования")
+        self.btn_statistic = QPushButton("Статистика")
+        
+        self.btn_guests.clicked.connect(self.show_guests)
+        self.btn_rooms.clicked.connect(self.show_rooms)
+        self.btn_services.clicked.connect(self.show_services)
+        self.btn_bookings.clicked.connect(self.show_bookings)
+        self.btn_statistic.clicked.connect(self.show_statistics)
+        
+        sidebar_layout.addWidget(self.btn_guests)
+        sidebar_layout.addWidget(self.btn_rooms)
+        sidebar_layout.addWidget(self.btn_services)
+        sidebar_layout.addWidget(self.btn_bookings)
+        sidebar_layout.addWidget(self.btn_statistic)
+        sidebar_layout.addStretch()
+        
+        # Область контента
+        content_area = QWidget()
+        content_layout = QVBoxLayout(content_area)
+        
+        # Виджет для переключения
+        self.stacked_widget = QStackedWidget()
+        
+        # Создаем вкладки
+        self.create_guests_tab()
+        self.create_rooms_tab()
+        self.create_services_tab()
+        self.create_bookings_tab()
+        
+        content_layout.addWidget(self.stacked_widget)
+        main_layout.addWidget(sidebar)
+        main_layout.addWidget(content_area)
+    
+    def create_guests_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Поиск и фильтрация по возрасту
+        search_filter_layout = QHBoxLayout()
+        
+        self.search_guest = QLineEdit()
+        self.search_guest.setPlaceholderText("Поиск по фамилии...")
+        self.search_guest.textChanged.connect(self.filter_guests)
+        
+        self.age_from = QSpinBox()
+        self.age_from.setRange(0, 120)
+        self.age_from.setValue(18)
+        self.age_from.valueChanged.connect(self.filter_guests)
+        
+        self.age_to = QSpinBox()
+        self.age_to.setRange(0, 180)
+        self.age_to.setValue(100)
+        self.age_to.valueChanged.connect(self.filter_guests)
+        
+        search_filter_layout.addWidget(QLabel("Поиск:"))
+        search_filter_layout.addWidget(self.search_guest)
+        search_filter_layout.addWidget(QLabel("Возраст от:"))
+        search_filter_layout.addWidget(self.age_from)
+        search_filter_layout.addWidget(QLabel("до:"))
+        search_filter_layout.addWidget(self.age_to)
+        
+        # Таблица гостей
+        self.guests_table = QTableView()
+        self.setup_table(self.guests_table)
+        
+        # Кнопки изменения и добавления
+        buttons_layout = QHBoxLayout()
+        
+        self.btn_add_guest = QPushButton("Добавить")
+        self.btn_add_guest.clicked.connect(self.add_guest)
+        buttons_layout.addWidget(self.btn_add_guest)
+        
+        self.btn_edit_guest = QPushButton("Изменить")
+        self.btn_edit_guest.clicked.connect(self.edit_guest)
+        buttons_layout.addWidget(self.btn_edit_guest)
+        
+        buttons_layout.addStretch()
+        
+        layout.addLayout(search_filter_layout)
+        layout.addWidget(self.guests_table)
+        layout.addLayout(buttons_layout)
+        
+        self.stacked_widget.addWidget(tab)
+    
+    def create_rooms_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Поиск (оставляем сверху)
+        search_layout = QHBoxLayout()
+        self.search_room = QLineEdit()
+        self.search_room.setPlaceholderText("Поиск по номеру...")
+        self.search_room.textChanged.connect(self.filter_rooms)
+        search_layout.addWidget(QLabel("Поиск:"))
+        search_layout.addWidget(self.search_room)
+        layout.addLayout(search_layout)
+        
+        # Таблица
+        self.rooms_table = QTableView()
+        self.rooms_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        self.setup_table(self.rooms_table)
+        layout.addWidget(self.rooms_table)
+        
+        # Кнопка добавления (ПЕРЕМЕЩАЕМ ВНИЗ)
+        buttons_layout = QHBoxLayout()
+        self.btn_add_room = QPushButton("Добавить")
+        self.btn_add_room.clicked.connect(self.add_room)
+        buttons_layout.addWidget(self.btn_add_room)  # Можно добавить другие кнопки справа
+        buttons_layout.addStretch()  # Выравнивание по левому краю
+        
+        layout.addLayout(buttons_layout)
+        self.stacked_widget.addWidget(tab)
+
+    def add_room(self):
+        dialog = AddRoomDialog(self.session, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.room_model.source_rooms = self.session.query(Номер).join(ТипНомера).all()
+            self.room_model.layoutChanged.emit()
+            QMessageBox.information(self, "Успех", "Номер успешно добавлен")
+    
+    def create_services_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Поиск для услуг
+        search_layout = QHBoxLayout()
+        self.search_service = QLineEdit()
+        self.search_service.setPlaceholderText("Поиск по названию...")
+        self.search_service.textChanged.connect(self.filter_services)
+        search_layout.addWidget(QLabel("Поиск:"))
+        search_layout.addWidget(self.search_service)
+        
+        # Таблица услуг
+        self.services_table = QTableView()
+        self.setup_table(self.services_table)
+        
+        layout.addLayout(search_layout)
+        layout.addWidget(self.services_table)
+        
+        self.stacked_widget.addWidget(tab)
+    
+    def create_bookings_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Поиск (сверху)
+        search_layout = QHBoxLayout()
+        self.search_booking = QLineEdit()
+        self.search_booking.setPlaceholderText("Поиск по фамилии...")
+        self.search_booking.textChanged.connect(self.filter_bookings)
+        search_layout.addWidget(QLabel("Поиск:"))
+        search_layout.addWidget(self.search_booking)
+        layout.addLayout(search_layout)
+        
+        # Таблица
+        self.bookings_table = QTableView()
+        self.bookings_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        self.setup_table(self.bookings_table)
+        layout.addWidget(self.bookings_table)
+        
+        # Кнопка добавления (ПЕРЕМЕЩАЕМ ВНИЗ)
+        buttons_layout = QHBoxLayout()
+        self.btn_add_booking = QPushButton("Добавить ")
+        self.btn_add_booking.clicked.connect(self.add_booking)
+        buttons_layout.addWidget(self.btn_add_booking)
+        buttons_layout.addStretch()
+        
+        layout.addLayout(buttons_layout)
+        self.stacked_widget.addWidget(tab)
+
+    def add_booking(self):
+        dialog = AddBookingDialog(self.session, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.booking_model.source_bookings = self.session.query(Бронирование).all()
+            self.booking_model.layoutChanged.emit()
+            QMessageBox.information(self, "Успех", "Бронирование успешно добавлено")
+    
+    def setup_table(self, table):
+        table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        table.verticalHeader().setVisible(False)
+    
+    def load_data(self):
+        # Загружаем модели
+        self.guest_model = GuestTableModel(self.session)
+        self.room_model = RoomTableModel(self.session)
+        self.service_model = ServiceTableModel(self.session)
+        self.booking_model = BookingTableModel(self.session)
+        
+        # Устанавливаем модели
+        self.guests_table.setModel(self.guest_model)
+        self.rooms_table.setModel(self.room_model)
+        self.services_table.setModel(self.service_model)
+        self.bookings_table.setModel(self.booking_model)
+    
+        # Убираем вызовы filter_*() здесь, они будут вызываться при показе вкладок
+    
+    def calculate_age(self, birth_date):
+        today = date.today()
+        return today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+    
+    def filter_guests(self):
+        search_text = self.search_guest.text().lower()
+        age_from = self.age_from.value()
+        age_to = self.age_to.value()
+        
+        # Обновляем данные только если source_guests пуст или None
+        if not hasattr(self.guest_model, 'source_guests') or not self.guest_model.source_guests:
+            self.guest_model.source_guests = self.session.query(Гость).all()
+        
+        filtered = []
+        for guest in self.guest_model.source_guests:
+            age = self.calculate_age(guest.Дата_рождения)
+            if (search_text in guest.Фамилия.lower() and 
+                age_from <= age <= age_to):
+                filtered.append(guest)
+        
+        self.guest_model.guests = filtered
+        # Используем dataChanged для более эффективного обновления
+        self.guest_model.layoutAboutToBeChanged.emit()
+        self.guest_model.layoutChanged.emit()
+            
+        self.guest_model.guests = filtered
+        self.guest_model.layoutChanged.emit()
+    
+    def filter_rooms(self):
+        if not hasattr(self, 'search_room') or not self.search_room:
             return
+        
+        search_text = self.search_room.text().lower()
+    
+        filtered = []
+        for room in self.room_model.source_rooms:
+            if search_text in room.Номер_комнаты.lower():
+                filtered.append(room)
+    
+        self.room_model.rooms = filtered
+        self.room_model.layoutChanged.emit()
+    
+    def filter_services(self):
+        search_text = self.search_service.text().lower()
+        
+        filtered = []
+        for service in self.service_model.source_services:
+            if search_text in service.Название.lower():
+                filtered.append(service)
+        
+        self.service_model.services = filtered
+        self.service_model.layoutChanged.emit()
+    
+    def filter_bookings(self):
+        search_text = self.search_booking.text().lower()
+        
+        filtered = []
+        for booking in self.booking_model.source_bookings:
+            if search_text in booking.гость.Фамилия.lower():
+                filtered.append(booking)
+        
+        self.booking_model.bookings = filtered
+        self.booking_model.layoutChanged.emit()
+    
+    def edit_guest(self):
+        selected = self.guests_table.selectionModel().selectedRows()
+        if not selected:
+            QMessageBox.warning(self, "Ошибка", "Выберите гостя для редактирования")
+            return
+        
+        selected_row = selected[0].row()
+        guest = self.guest_model.guests[selected_row]
+        
+        dialog = EditGuestDialog(guest, self.session, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.guest_model.load_data()  # Обновляем данные после редактирования
+            self.filter_guests()
+            QMessageBox.information(self, "Успех", "Данные гостя успешно обновлены")
+            
+    def add_guest(self):  # Важно: именно add_guest, а не add_room
+        dialog = AddGuestDialog(self.session, self)  # Должен быть AddGuestDialog
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.guest_model.load_data()
+            self.filter_guests()
+            QMessageBox.information(self, "Успех", "Гость успешно добавлен")
 
-        payment_id = int(self.table.item(selected_row, 0).text())
-        payment_name = self.table.item(selected_row, 1).text()
+    
+    def show_rooms(self):
+        self.stacked_widget.setCurrentIndex(1)
+        self.filter_rooms()  # Теперь фильтрация вызывается здесь
 
-        reply = QMessageBox.question(
-            self,
-            "Подтверждение удаления",
-            f"Вы действительно хотите удалить платеж?\nID: {payment_id}\nНаименование: {payment_name}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+    def show_guests(self):
+        self.stacked_widget.setCurrentIndex(0)
+        self.filter_guests()
 
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
+    def show_services(self):
+        self.stacked_widget.setCurrentIndex(2)
+        self.filter_services()
 
-                self.db.query(ПлатежиПользователей)\
-                    .filter(ПлатежиПользователей.id_платежа == payment_id)\
-                    .delete()
-                    
-                self.db.query(Платеж)\
-                    .filter(Платеж.id == payment_id)\
-                    .delete()
-                    
-                self.db.commit()
-                self.load_payments()  
-
-            except Exception as e:
-                self.db.rollback()
-                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить платеж: {str(e)}")
-
+    def show_bookings(self):
+        self.stacked_widget.setCurrentIndex(3)
+        self.filter_bookings()
     
     def closeEvent(self, event):
-        self.db.close()
-        super().closeEvent(event)
-
-class PaymentApp(QMainWindow):
-    def __init__(self, current_user):
-        super().__init__()
-        self.current_user = current_user  
-        self.setWindowTitle(f"Управление платежами - {current_user.логин} ({current_user.фамилия} {current_user.имя})")
-        self.setGeometry(100, 100, 800, 600)
+        self.session.close()
+        event.accept()
         
+    def show_statistics(self):
+    # Проверяем, есть ли данные в БД
+        has_data = self.session.query(Бронирование).first() is not None
         
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
+        if not has_data:
+            QMessageBox.information(self, "Нет данных", 
+                                "В базе данных нет информации о бронированиях для построения статистики.")
+            return
         
-        layout = QVBoxLayout()
-        main_widget.setLayout(layout)
-        
-        control_panel = QHBoxLayout()
-        
-        self.btn_add = QPushButton("+")
-        self.btn_add.clicked.connect(self.add_payment)
-        self.btn_remove = QPushButton("-")
-        self.btn_remove.clicked.connect(self.delete_payment)
-
-        #Разделитель (Вот эта палочка на макете)
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.VLine)
-        
-        date_layout = QHBoxLayout()
-        
-        self.date_from = QDateEdit(QDate.currentDate())
-        self.date_from.setCalendarPopup(True)
-        self.date_from.setDisplayFormat("dd.MM.yyyy")
-        self.date_from.setDate(QDate(2016, 11, 1))
-        
-        self.date_to = QDateEdit(QDate.currentDate())
-        self.date_to.setCalendarPopup(True)
-        self.date_to.setDisplayFormat("dd.MM.yyyy")
-        
-        date_layout.addWidget(QLabel("с"))
-        date_layout.addWidget(self.date_from)
-        date_layout.addWidget(QLabel("по"))
-        date_layout.addWidget(self.date_to)
-        
-        category_layout = QHBoxLayout()
-        category_layout.addWidget(QLabel("Категория:"))
-        
-        self.category_combo = QComboBox()
-        self.load_categories_to_combobox()
-        
-        self.btn_select = QPushButton("Выбрать")
-        self.btn_select.clicked.connect(self.apply_filters)
-        self.btn_clear = QPushButton("Очистить")
-        self.btn_clear.clicked.connect(self.clear_filters)
-        
-        self.btn_report = QPushButton("Отчет")
-        self.btn_report.clicked.connect(self.generate_report)
-
-        
-        control_panel.addWidget(self.btn_add)
-        control_panel.addWidget(self.btn_remove)
-        control_panel.addWidget(divider)
-        control_panel.addLayout(date_layout)
-        control_panel.addSpacing(20)
-        control_panel.addLayout(category_layout)
-        category_layout.addWidget(self.category_combo)
-        category_layout.addWidget(self.btn_select)
-        category_layout.addWidget(self.btn_clear)
-        category_layout.addWidget(self.btn_report)
-        
-        self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels([
-            "Наименование платежа",
-            "Количество", 
-            "Цена",
-            "Сумма",
-            "Категория"
-        ])
-        
-        self.setup_table_size()
-        
-        self.load_payments()
-        
-        layout.addLayout(control_panel)
-        layout.addWidget(self.table)
-        
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-    
-    def setup_table_size(self):
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  
-    
-    def load_payments(self):
-        self.clear_filters()
-        try:
-            db = SessionLocal()
-            
-            payments = db.query(Платеж, Категория)\
-                .join(ПлатежиПользователей, ПлатежиПользователей.id_платежа == Платеж.id)\
-                .join(Категория, Категория.id == Платеж.id_категории)\
-                .filter(ПлатежиПользователей.id_пользователя == self.current_user.id)\
-                .order_by(Платеж.дата.desc())\
-                .all()
-            
-            self.table.setRowCount(len(payments))
-            
-            for row, (payment, category) in enumerate(payments):
-                self.table.setItem(row, 0, QTableWidgetItem(payment.наименование_платежа))
-                self.table.setItem(row, 1, QTableWidgetItem(f"{payment.количество:.2f}"))
-                self.table.setItem(row, 2, QTableWidgetItem(f"{payment.цена:.2f}"))
-                self.table.setItem(row, 3, QTableWidgetItem(f"{payment.стоимость:.2f}"))
-                self.table.setItem(row, 4, QTableWidgetItem(category.название))
-                
-            self.table.resizeColumnsToContents()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить платежи: {str(e)}")
-        finally:
-            db.close()
-
-    def add_payment(self):
-        dialog = AddPayment()
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            try:
-                db = SessionLocal()
-                data = dialog.get_payment_data()
-                
-                new_payment = Платеж(
-                    дата=QDate.currentDate().toPyDate(),
-                    id_категории=data['category_id'],
-                    наименование_платежа=data['name'],
-                    количество=data['quantity'],
-                    цена=data['price']
-                )
-                
-                db.add(new_payment)
-                db.flush()
-                
-                db.add(ПлатежиПользователей(
-                    id_пользователя=self.current_user.id,
-                    id_платежа=new_payment.id
-                ))
-                db.commit()
-                
-                QMessageBox.information(self, "Успех", "Платеж добавлен!")
-                self.load_payments()
-                
-            except Exception as e:
-                db.rollback()
-                QMessageBox.critical(self, "Ошибка", f"Ошибка добавления: {str(e)}")
-            finally:
-                db.close()
-                
-    def delete_payment(self):
-        dialog = DeletePayment(self.current_user, self)
-        dialog.exec()  
-        self.load_payments()  
-
-    def load_categories_to_combobox(self):
-        try:
-            db = SessionLocal()
-            categories = db.query(Категория).order_by(Категория.название).all()
-            
-            self.category_combo.clear()
-            self.category_combo.addItem("Все категории", None)  
-            
-            for category in categories:
-                self.category_combo.addItem(category.название, category.id)
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить категории: {str(e)}")
-        finally:
-            db.close()
-            
-    def apply_filters(self):
-        try:
-            if self.date_from.date() > self.date_to.date():
-                QMessageBox.warning(self, "Ошибка", "Дата 'с' не может быть больше даты 'по'")
-                return
-                
-            db = SessionLocal()
-            
-            date_from = self.date_from.date().toPyDate()
-            date_to = self.date_to.date().toPyDate()
-            category_id = self.category_combo.currentData()
-            
-            query = db.query(Платеж, Категория)\
-                .join(ПлатежиПользователей, ПлатежиПользователей.id_платежа == Платеж.id)\
-                .join(Категория, Категория.id == Платеж.id_категории)\
-                .filter(ПлатежиПользователей.id_пользователя == self.current_user.id)\
-                .filter(Платеж.дата.between(date_from, date_to))
-                
-            if category_id:
-                query = query.filter(Платеж.id_категории == category_id)
-                
-            payments = query.order_by(Платеж.дата.desc()).all()
-            
-            self.update_table(payments)
-            self.setup_table_size()
-            
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось применить фильтры: {str(e)}")
-        finally:
-            db.close()
-                
-    def clear_filters(self):
-        today = QDate.currentDate()
-        self.date_from.setDate(QDate(2016, 11, 1))
-        self.date_to.setDate(today)
-        
-        self.category_combo.setCurrentIndex(0)
-        
-        self.apply_filters()
-        self.setup_table_size()
-        
-    def update_table(self, payments):
-        self.table.setRowCount(len(payments))
-        
-        for row, (payment, category) in enumerate(payments):
-            self.table.setItem(row, 0, QTableWidgetItem(payment.наименование_платежа))
-            self.table.setItem(row, 1, QTableWidgetItem(f"{payment.количество:.2f}"))
-            self.table.setItem(row, 2, QTableWidgetItem(f"{payment.цена:.2f}"))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{payment.стоимость:.2f}"))
-            self.table.setItem(row, 4, QTableWidgetItem(category.название))
-            
-    def generate_report(self):
-        try:
-            db = SessionLocal()
-
-            report_data = self.prepare_report_data(db)
-            if not report_data:
-                return
-
-            self.show_report_preview(report_data)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка генерации отчета:\n{str(e)}")
-        finally:
-            db.close()
-            
-    def prepare_report_data(self, db):
-        date_from = self.date_from.date().toPyDate()
-        date_to = self.date_to.date().toPyDate()
-        category_id = self.category_combo.currentData()
-
-        query = db.query(Платеж, Категория)\
-            .join(ПлатежиПользователей, ПлатежиПользователей.id_платежа == Платеж.id)\
-            .join(Категория, Категория.id == Платеж.id_категории)\
-            .filter(ПлатежиПользователей.id_пользователя == self.current_user.id)\
-            .filter(Платеж.дата.between(date_from, date_to))
-
-        if category_id:
-            query = query.filter(Платеж.id_категории == category_id)
-
-        payments = query.order_by(Категория.название, Платеж.дата).all()
-
-        if not payments:
-            QMessageBox.information(self, "Информация", "Нет данных для отчета в выбранном периоде")
-            return None
-
-        grouped = {}
-        total_sum = 0
-
-        for payment, category in payments:
-            grouped.setdefault(category.название, []).append(payment)
-            total_sum += float(payment.стоимость)
-
-        return {
-            'date_from': date_from,
-            'date_to': date_to,
-            'grouped_payments': grouped,
-            'total_sum': total_sum,
-            'user': self.current_user
-        }
-        
-    def show_report_preview(self, report_data):
-        preview_dialog = QDialog(self)
-        preview_dialog.setWindowTitle("Предпросмотр отчета")
-        preview_dialog.resize(800, 600)
-
-        layout = QVBoxLayout(preview_dialog)
-
-        text_edit = QTextEdit()
-        text_edit.setReadOnly(True)
-        
-        report_text = self.generate_report_text(report_data)
-        text_edit.setHtml(report_text)
-        
-        layout.addWidget(text_edit)
-
-        buttons_layout = QHBoxLayout()
-        
-        btn_pdf = QPushButton("Сохранить в PDF")
-        btn_pdf.clicked.connect(lambda: self.save_to_pdf(report_data))
-        
-        btn_docx = QPushButton("Сохранить в DOCX")
-        btn_docx.clicked.connect(lambda: self.save_to_docx(report_data))
-        
-        btn_close = QPushButton("Закрыть")
-        btn_close.clicked.connect(preview_dialog.reject)
-        
-        buttons_layout.addWidget(btn_pdf)
-        buttons_layout.addWidget(btn_docx)
-        buttons_layout.addWidget(btn_close)
-        
-        layout.addLayout(buttons_layout)
-
-        preview_dialog.exec()
-        
-    def generate_report_text(self, report_data):
-        html = f"""
-        <html>
-        <head>
-        <style>
-        body {{ font-family: Arial; margin: 20px; }}
-        h1 {{ text-align: center; }}
-        h2 {{ margin-top: 20px; }}
-        .payment {{ margin-left: 20px; margin-bottom: 5px; }}
-        .total {{ font-weight: bold; margin-top: 20px; }}
-        .footer {{ margin-top: 40px; font-size: smaller; }}
-        </style>
-        </head>
-        <body>
-        <h1>Отчет о платежах</h1>
-        <p style="text-align: center;">
-            Период: {report_data['date_from'].strftime('%d.%m.%Y')} - {report_data['date_to'].strftime('%d.%m.%Y')}
-        </p>
-        """
-
-        for category, payments in report_data['grouped_payments'].items():
-            html += f"<h2>{category}</h2>"
-            for payment in payments:
-                html += f"""
-                <div class="payment">
-                    {payment.дата.strftime('%d.%m.%Y')} - {payment.наименование_платежа} 
-                    <span style="float: right;">{payment.стоимость:.2f} р.</span>
-                </div>
-                """
-        
-        html += f"""
-        <div class="total">ИТОГО: {report_data['total_sum']:.2f} р.</div>
-        <div class="footer">
-            {report_data['user'].фамилия} {report_data['user'].имя} {report_data['user'].отчество or ''}
-        </div>
-        </body>
-        </html>
-        """
-        
-        return html
-    
-    def save_to_pdf(self, report_data):
-        try:
-            filename, _ = QFileDialog.getSaveFileName(
-                self, 
-                "Сохранить отчет в PDF", 
-                "", 
-                "PDF файлы (*.pdf)"
-            )
-            
-            if not filename:
-                return
-
-            pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
-            registerFontFamily('DejaVuSans', normal='DejaVuSans', bold='DejaVuSans')
-
-            doc = SimpleDocTemplate(filename, pagesize=A4)
-            elements = []
-
-            header_style = ParagraphStyle(
-                'Header',
-                fontName='DejaVuSans',
-                fontSize=16,
-                alignment=TA_CENTER,
-                spaceAfter=20
-            )
-
-            category_style = ParagraphStyle(
-                'Category',
-                fontName='DejaVuSans',
-                fontSize=14,
-                spaceBefore=12,
-                spaceAfter=6
-            )
-
-            payment_style = ParagraphStyle(
-                'Payment',
-                fontName='DejaVuSans',
-                fontSize=12,
-                leading=16
-            )
-
-            period_text = f"Список платежей с {report_data['date_from'].strftime('%d.%m.%Y')} по {report_data['date_to'].strftime('%d.%m.%Y')}"
-            elements.append(Paragraph(period_text, header_style))
-
-            for category_name, payments_list in report_data['grouped_payments'].items():
-                elements.append(Paragraph(f"<b>{category_name}</b>", category_style))
-                for p in payments_list:
-                    date_str = p.дата.strftime('%d.%m.%Y')
-                    elements.append(Paragraph(
-                        f"{date_str} — {p.наименование_платежа} ............. {p.стоимость:.2f} р.",
-                        payment_style
-                    ))
-                elements.append(Spacer(1, 10))
-
-            elements.append(Spacer(1, 20))
-            elements.append(Paragraph(f"<b>ИТОГО:</b> {report_data['total_sum']:.2f} р.", category_style))
-
-            def add_footer(canvas: Canvas, doc):
-                fio = f"{report_data['user'].фамилия} {report_data['user'].имя} {report_data['user'].отчество or ''}"
-                canvas.saveState()
-                canvas.setFont("DejaVuSans", 10)
-                canvas.drawRightString(200 * mm, 10 * mm, f"Страница {doc.page}")
-                canvas.drawString(20 * mm, 10 * mm, fio.strip())
-                canvas.restoreState()
-
-            doc.build(elements, onFirstPage=add_footer, onLaterPages=add_footer)
-
-            QMessageBox.information(self, "Готово", "PDF отчет успешно сохранен.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения PDF:\n{str(e)}")
-            
-    def save_to_docx(self, report_data):
-        try:
-            filename, _ = QFileDialog.getSaveFileName(
-                self, 
-                "Сохранить отчет в DOCX", 
-                "", 
-                "Word документы (*.docx)"
-            )
-            
-            
-            if not filename:
-                return
-
-            doc = Document()
-            
-            style = doc.styles['Normal']
-            style.font.name = 'Times New Roman'
-            style.font.size = Pt(12)
-            
-            title = doc.add_paragraph()
-            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            title_run = title.add_run("Отчет о платежах")
-            title_run.bold = True
-            title_run.font.size = Pt(14)
-            
-            period = doc.add_paragraph()
-            period.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            period.add_run(
-                f"Период: {report_data['date_from'].strftime('%d.%m.%Y')} - {report_data['date_to'].strftime('%d.%m.%Y')}"
-            )
-            
-            doc.add_paragraph()  
-            
-            for category, payments in report_data['grouped_payments'].items():
-                cat_para = doc.add_paragraph()
-                cat_run = cat_para.add_run(category)
-                cat_run.bold = True
-                
-                for payment in payments:
-                    para = doc.add_paragraph()
-                    para.add_run(f"{payment.дата.strftime('%d.%m.%Y')} - {payment.наименование_платежа}")
-                    
-                    para.add_run("\t").bold = True
-                    last_run = para.add_run(f"{payment.стоимость:.2f} р.")
-                    last_run.bold = True
-                
-                doc.add_paragraph()  
-            
-     
-            total_para = doc.add_paragraph()
-            total_run = total_para.add_run(f"ИТОГО: {report_data['total_sum']:.2f} р.")
-            total_run.bold = True
-            
-            doc.add_paragraph("\n")  
-            sign_para = doc.add_paragraph()
-            sign_para.add_run(
-                f"{report_data['user'].фамилия} {report_data['user'].имя} {report_data['user'].отчество or ''}"
-            )
-            
-            doc.save(filename)
-            QMessageBox.information(self, "Готово", "DOCX отчет успешно сохранен.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения DOCX:\n{str(e)}")
-
-
-
-
-
-        
-        
+        dialog = StatisticsDialog(self.session, self)
+        dialog.exec()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-        
-    login_window = LoginWindow()
-    if login_window.exec() == QDialog.DialogCode.Accepted:
-        main_window = PaymentApp(login_window.current_user)
-        main_window.show()
-        sys.exit(app.exec())
-    else:
-      sys.exit()
-        
+    window = HotelApp()
+    window.show()
+    sys.exit(app.exec())

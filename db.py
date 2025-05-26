@@ -1,11 +1,12 @@
-
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-DB_URI = "postgresql+psycopg2://postgres:password#@localhost:5432/postgres?options=-csearch_path%3DprodjectX"
+DATABASE_URL = "mysql+mysqlconnector://root:Qwerasdf135#@localhost/pz?auth_plugin=mysql_native_password&charset=utf8mb4"
 
-engine = create_engine(DB_URI)
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
 
 def get_db():
     db = SessionLocal()
@@ -13,9 +14,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-try:
-    with engine.connect() as connection:
-        print("Успех подключения к БД!")
-except Exception as e:
-    print(f"Ошибка подключения: {e}")

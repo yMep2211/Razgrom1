@@ -1,59 +1,85 @@
+from sqlalchemy import Column, Integer, String, Date, Float, ForeignKey
+from sqlalchemy.orm import relationship
+from db import Base
 
-from sqlalchemy import Column, Integer, String, Numeric, Date, ForeignKey, Computed
-from sqlalchemy.orm import declarative_base, relationship
-from db import engine
+class Гость(Base):
+    __tablename__ = 'Гость'
+    
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    Фамилия = Column(String(100), nullable=False)
+    Имя = Column(String(100), nullable=False)
+    Отчество = Column(String(100))
+    Дата_рождения = Column(Date, nullable=False)
+    Паспорт_серия = Column(String(10))
+    Паспорт_номер = Column(String(20))
+    Паспорт_выдан = Column(Date)
+    Адрес = Column(String(500))
+    Телефон = Column(String(20), nullable=False)
+    
+    бронирования = relationship("Бронирование", back_populates="гость")
+    сопутствующие_гости = relationship("ГостьБронирования", back_populates="гость")
 
-Base = declarative_base()
+class ТипНомера(Base):
+    __tablename__ = 'ТипНомера'
+    
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    Название = Column(String(200), nullable=False, unique=True)
+    Описание = Column(String(1000))
+    Цена_сутки = Column(Float, nullable=False)
+    
+    номера = relationship("Номер", back_populates="тип")
 
-class Категория(Base):
-    __tablename__ = 'категория'
-    __table_args__ = {'schema': 'prodjectX'}
+class Номер(Base):
+    __tablename__ = 'Номер'
     
-    id = Column(Integer, primary_key=True)
-    название = Column(String(100), nullable=False)
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    Тип_ID = Column(Integer, ForeignKey('ТипНомера.ID'), nullable=False)
+    Номер_комнаты = Column(String(10), nullable=False, unique=True)
+    Статус = Column(String(50), server_default='свободен')
     
-    платежи = relationship("Платеж", back_populates="категория")
+    тип = relationship("ТипНомера", back_populates="номера")
+    бронирования = relationship("Бронирование", back_populates="номер")
 
-class Пользователь(Base):
-    __tablename__ = 'пользователь'
-    __table_args__ = {'schema': 'prodjectX'}
+class Услуга(Base):
+    __tablename__ = 'Услуга'
     
-    id = Column(Integer, primary_key=True)
-    фамилия = Column(String(50), nullable=False)
-    имя = Column(String(50), nullable=False)
-    отчество = Column(String(50))
-    логин = Column(String(50), nullable=False, unique=True)
-    пароль = Column(String(100), nullable=False)
-    пин_код = Column(String(10))
-    
-    платежи = relationship("ПлатежиПользователей", back_populates="пользователь")
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    Название = Column(String(200), nullable=False, unique=True)
+    Описание = Column(String(1000))
+    Цена = Column(Float)
 
-class Платеж(Base):
-    __tablename__ = 'платеж'
-    __table_args__ = {'schema': 'prodjectX'}
+class Бронирование(Base):
+    __tablename__ = 'Бронирование'
     
-    id = Column(Integer, primary_key=True)
-    дата = Column(Date, nullable=False)
-    наименование_платежа = Column(String(100), nullable=False)
-    количество = Column(Numeric(10, 2), default=1)
-    цена = Column(Numeric(10, 2), nullable=False)
-    стоимость = Column(Numeric(10, 2), Computed("количество * цена"), server_default=None) 
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    Гость_ID = Column(Integer, ForeignKey('Гость.ID'), nullable=False)
+    Номер_ID = Column(Integer, ForeignKey('Номер.ID'), nullable=False)
+    Дата_заезда = Column(Date, nullable=False)
+    Дата_выезда = Column(Date, nullable=False)
+    Статус_оплаты = Column(String(50), server_default='не оплачено')
     
-    id_категории = Column(Integer, ForeignKey('prodjectX.категория.id'))
-    категория = relationship("Категория", back_populates="платежи")
-    
-    пользователи = relationship("ПлатежиПользователей", back_populates="платеж")
+    гость = relationship("Гость", back_populates="бронирования")
+    номер = relationship("Номер", back_populates="бронирования")
+    услуги = relationship("УслугаБронирования", back_populates="бронирование")
+    дополнительные_гости = relationship("ГостьБронирования", back_populates="бронирование")
 
-class ПлатежиПользователей(Base):
-    __tablename__ = 'платежи_пользователей'
-    __table_args__ = {'schema': 'prodjectX'}
+class ГостьБронирования(Base):
+    __tablename__ = 'ГостьБронирования'
     
-    id = Column(Integer, primary_key=True)
-    id_пользователя = Column(Integer, ForeignKey('prodjectX.пользователь.id'))
-    id_платежа = Column(Integer, ForeignKey('prodjectX.платеж.id'))
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    Бронирование_ID = Column(Integer, ForeignKey('Бронирование.ID'), nullable=False)
+    Гость_ID = Column(Integer, ForeignKey('Гость.ID'), nullable=False)
     
-    пользователь = relationship("Пользователь", back_populates="платежи")
-    платеж = relationship("Платеж", back_populates="пользователи")
+    бронирование = relationship("Бронирование", back_populates="дополнительные_гости")
+    гость = relationship("Гость", back_populates="сопутствующие_гости")
 
-
-Base.metadata.create_all(engine)
+class УслугаБронирования(Base):
+    __tablename__ = 'УслугаБронирования'
+    
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    Бронирование_ID = Column(Integer, ForeignKey('Бронирование.ID'), nullable=False)
+    Услуга_ID = Column(Integer, ForeignKey('Услуга.ID'), nullable=False)
+    Количество = Column(Integer, server_default='1')
+    
+    бронирование = relationship("Бронирование", back_populates="услуги")
+    услуга = relationship("Услуга")
