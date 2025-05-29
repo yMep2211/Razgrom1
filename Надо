@@ -1,0 +1,295 @@
+import sys
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTableView, QLabel, QLineEdit, QDateEdit,
+    QComboBox, QDialog, QFormLayout, QMessageBox
+)
+from PyQt6.QtCore import QDate
+from PyQt6.QtGui import QStandardItemModel, QStandardItem
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from models import Цветок, Категория, Горшок, Полив
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ПОДГОТОВКА К ЗАЧЕТУ")
+        self.setGeometry(100, 100, 800, 600)
+        
+        self.engine = create_engine("postgresql+psycopg2://postgres:Qwerasdf135#@localhost:5432/postgres?options=-csearch_path%3Dzachet")
+        Session = sessionmaker(bind=self.engine)
+        self.session = Session()
+        
+        self.main_widget = QWidget()
+        self.setCentralWidget(self.main_widget)
+        self.main_layout = QVBoxLayout()
+        self.main_widget.setLayout(self.main_layout)
+        
+        self.create_ui()
+        
+    def create_ui(self):
+        #Кнопки
+        self.but_layout = QHBoxLayout()
+        
+        self.but_add = QPushButton("Добавить цветок")
+        self.but_add.clicked.connect(self.show_add_flower_dialog)
+        self.but_remove = QPushButton("Удалить цветок")
+        self.but_remove.clicked.connect(self.delete_flower)
+        self.but_filter = QPushButton("Фильтровать цветы")
+        self.but_filter.clicked.connect(self.apply_filters)
+        
+        self.but_layout.addWidget(self.but_add)
+        self.but_layout.addWidget(self.but_remove)
+        self.but_layout.addWidget(self.but_filter)
+        
+        #Поля для фильтрации
+        self.filter_layout = QHBoxLayout()
+        
+        self.category_filter = QComboBox()
+        self.load_categories()
+        
+        self.date_filter = QDateEdit()
+        self.date_filter.setDate(QDate.currentDate())
+        self.date_filter.setCalendarPopup(True)
+        
+        self.filter_layout.addWidget(QLabel("Категории: "))
+        self.filter_layout.addWidget(self.category_filter)
+        self.filter_layout.addWidget(QLabel("Дата после: "))
+        self.filter_layout.addWidget(self.date_filter)
+        
+        #Таблица для отображения данных о цветке
+        self.table = QTableView()
+        self.model = QStandardItemModel()
+        self.table.setModel(self.model)
+        
+        #Добавление в главный layout
+        self.main_layout.addLayout(self.but_layout)
+        self.main_layout.addLayout(self.filter_layout)
+        self.main_layout.addWidget(self.table)
+                
+        #Загрузка данных
+        self.load_data()
+
+
+
+    def load_data(self):
+        #Загружаем данные в таблицу
+        flowers = self.session.query(Цветок).all() #Запрос для получения всех данных из таблицы
+        self.model.clear() #Очистка модели таблицы
+        self.model.setHorizontalHeaderLabels(["Название","Категория","Дата посадки"]) #Установка колонок
+        
+        for flower in flowers: #Цикл для заполнения всех строк по колонкам
+            row = [
+                QStandardItem(flower.название),
+                QStandardItem(flower.категория.название),
+                QStandardItem(flower.дата_посадки.strftime("%d.%m.%Y"))
+            ]
+            self.model.appendRow(row) #Заполнение строк
+        
+    def load_categories(self):
+        #Загрузка категорий в комбобокс
+        categories = self.session.query(Категория).all()
+        self.category_filter.clear
+        self.category_filter.addItem("Все категории", None)
+        for category in categories:
+            self.category_filter.addItem(category.название, category.id_категории)
+        
+    def show_add_flower_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Добавление цветка")
+        layout = QFormLayout()
+        
+        self.name = QLineEdit()
+        self.category = QComboBox()
+        self.date = QDateEdit()
+        self.date.setDate(QDate.currentDate())
+        self.date.setCalendarPopup(True)
+        
+        categories = self.session.query(Категория).all()
+        for category in categories:
+            self.category.addItem(category.название,category.id_категории)
+            
+        layout.addRow("Название цветка:", self.name)
+        layout.addRow("Категория цветка:", self.category)
+        layout.addRow("Дата посадки:", self.date)
+        
+        btn_save = QPushButton("Добавить")
+        btn_save.clicked.connect(lambda: self.add_flower(dialog))
+        layout.addRow(btn_save)
+        
+        dialog.setLayout(layout)
+        dialog.exec()
+        
+    def add_flower(self, dialog):
+        name = self.name.text()
+        category_id = self.category.currentData()
+        plant_date = self.date.date().toPyDate()
+        
+        if not name:
+            QMessageBox.warning(self, "Ошибка","Введите название для цветка")
+            return
+
+
+
+        new_flower = Цветок(
+            название = name,
+            id_категории = category_id,
+            дата_посадки = plant_date
+        )
+        
+        try:
+            self.session.add(new_flower)
+            self.session.commit()
+            QMessageBox.information(self,"Успех","Данные успешно добавлены")
+            self.load_data()
+            dialog.close()
+        except Exception as e:
+            self.session.rollback()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {str(e)}")
+            
+    def delete_flower(self):
+        selected = self.table.currentIndex()
+        
+        # Правильная проверка выбранной строки
+        if not selected.isValid():
+            QMessageBox.warning(self, "Ошибка", "Выберите цветок для удаления")
+            return
+        
+        row = selected.row()
+        
+        # Проверяем, что все нужные ячейки существуют
+        name_item = self.model.item(row, 0)   # Название
+        category_item = self.model.item(row, 1)  # Категория
+        date_item = self.model.item(row, 2)    # Дата
+        
+        # Получаем данные из таблицы
+        flower_name = name_item.text()
+        flower_category = category_item.text()
+        flower_date = date_item.text()
+        
+        # Формируем понятное сообщение для подтверждения
+        confirm_msg = (
+            f"Вы действительно хотите удалить цветок?\n\n"
+            f"Название: {flower_name}\n"
+            f"Категория: {flower_category}\n"
+            f"Дата посадки: {flower_date}"
+        )
+        
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение удаления",
+            confirm_msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Ищем цветок по всем параметрам для точного соответствия
+                flower = self.session.query(Цветок)\
+                    .join(Категория)\
+                    .filter(
+                        Цветок.название == flower_name,
+                        Категория.название == flower_category,
+                        Цветок.дата_посадки == QDate.fromString(flower_date, "dd.MM.yyyy").toPyDate()
+                    )\
+                    .first()
+                
+                if flower:
+                    self.session.delete(flower)
+                    self.session.commit()
+                    self.load_data()  # Обновляем таблицу
+                    QMessageBox.information(self, "Успех", f"Цветок '{flower_name}' успешно удалён")
+                else:
+                    QMessageBox.warning(self, "Ошибка", "Цветок не найден в базе данных")
+                    
+            except Exception as e:
+                self.session.rollback()
+                QMessageBox.critical(self, "Ошибка", f"Ошибка при удалении: {str(e)}")
+    
+    def apply_filters(self):
+        category_id = self.category_filter.currentData()
+        filter_date = self.date_filter.date().toPyDate()
+        
+        query = self.session.query(Цветок)
+        
+        if category_id:
+            query = query.filter(Цветок.id_категории == category_id)
+            
+        query = query.filter(Цветок.дата_посадки >= filter_date)
+        
+        flowers = query.all()
+        self.model.clear()
+        self.model.setHorizontalHeaderLabels(["Название", "Категория", "Дата посадки"])
+        
+        for flower in flowers:
+            row = [
+                QStandardItem(flower.название),
+                QStandardItem(flower.категория.название),
+                QStandardItem(flower.дата_посадки.strftime("%d.%m.%Y"))
+            ]
+            self.model.appendRow(row)
+        
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
+
+#models.py
+from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, ForeignKey, Date, DateTime
+from db import Base
+from datetime import datetime, date
+
+class Категория(Base):
+    __tablename__ = 'категория'
+    __table_args__ = {'schema': 'zachet'}
+    
+    id_категории = Column(Integer, primary_key=True, autoincrement=True)
+    название = Column(String(100), nullable=False)
+    
+    цветы =  relationship("Цветок", back_populates="категория")
+
+class Цветок(Base):
+    __tablename__ = 'цветок'
+    __table_args__ = {'schema': 'zachet'}
+    
+    id_цветка = Column(Integer, primary_key=True, autoincrement=True)
+    название = Column(String(100), nullable=False)
+    id_категории = Column(Integer, ForeignKey('zachet.категория.id_категории'))
+    дата_посадки = Column(Date, default=date.today)
+    
+    категория =  relationship("Категория", back_populates="цветы")
+    горшки =  relationship("ЦветыВГоршках", back_populates="цветок")
+    поливы =  relationship("Полив", back_populates="цветок")
+
+class Горшок(Base):
+    __tablename__ = 'горшок'
+    __table_args__ = {'schema': 'zachet'}
+    
+    id_горшка = Column(Integer, primary_key=True, autoincrement=True)
+    номер_горшка = Column(Integer, nullable=False, unique=True)
+    
+    цветы =  relationship("ЦветыВГоршках", back_populates="горшок")
+
+class ЦветыВГоршках(Base):
+    __tablename__ = "цветы_в_горшках"
+    __table_args__ = {'schema': 'zachet'}
+    
+    id_цветка_в_горшке = Column(Integer, primary_key=True, autoincrement=True)
+    id_цветка = Column(Integer, ForeignKey('zachet.цветок.id_цветка'))
+    id_горшка = Column(Integer, ForeignKey('zachet.горшок.id_горшка'))
+    
+    цветок = relationship("Цветок",back_populates="горшки")
+    горшок = relationship("Горшок",back_populates="цветы")
+    
+class Полив(Base):
+    __tablename__ = 'полив'
+    __table_args__ = {'schema': 'zachet'}
+    
+    id_полива = Column(Integer, primary_key=True, autoincrement=True)
+    id_цветка = Column(Integer, ForeignKey('zachet.цветок.id_цветка'))
+    дата_полива = Column(DateTime, default=datetime.now)
+    количество_воды = Column(Integer)
+    
+    цветок = relationship("Цветок", back_populates="поливы")
